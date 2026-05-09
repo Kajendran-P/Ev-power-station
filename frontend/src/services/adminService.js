@@ -1,0 +1,12 @@
+import API from './api';
+export const getAdminStats = () => API.get('/admin/stats');
+export const getWorkers = () => API.get('/admin/workers');
+export const addWorker = (data) => API.post('/admin/workers', data);
+export const deleteWorker = (id) => API.delete(`/admin/workers/${id}`);
+export const getParts = () => API.get('/admin/parts');
+export const getChartData = () => API.get('/admin/charts');
+export const getTechList = () => API.get('/tech/list');
+export const getTechJobs = () => API.get('/tech/jobs');
+export const getTechHistory = () => API.get('/tech/history');
+export const getTechStats = () => API.get('/tech/stats');
+export const completeTechJob = (data) => API.post('/tech/complete', data);
