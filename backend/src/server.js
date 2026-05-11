@@ -48,11 +48,32 @@ app.get('/api/health', (req, res) => {
     timestamp: Date.now(),
     dbState: mongoose.connection.readyState,
     envCheck: {
-      MONGO_URI: process.env.MONGO_URI ? 'SET' : 'MISSING',
+      MONGO_URI: process.env.MONGO_URI ? 'SET (' + process.env.MONGO_URI.substring(0, 30) + '...)' : 'MISSING',
       JWT_SECRET: process.env.JWT_SECRET ? 'SET' : 'MISSING',
       FRONTEND_URL: process.env.FRONTEND_URL || 'MISSING'
     }
   });
+});
+
+// Debug DB connection (shows actual error)
+app.get('/api/debug-db', async (req, res) => {
+  try {
+    await connectDB();
+    const mongoose = require('mongoose');
+    res.json({
+      success: true,
+      readyState: mongoose.connection.readyState,
+      host: mongoose.connection.host,
+      dbName: mongoose.connection.name
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack?.split('\n').slice(0, 5),
+      mongoUri: process.env.MONGO_URI ? process.env.MONGO_URI.substring(0, 50) + '...' : 'NOT SET'
+    });
+  }
 });
 
 // ══════════════════════════════════════════════════════════
