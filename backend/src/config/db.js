@@ -1,47 +1,54 @@
 const mongoose = require('mongoose');
 
-let cached = global._mongooseConnection;
+// Global cache to persist connection across Vercel serverless invocations
+const MONGODB_URI = () => process.env.MONGO_URI;
+
+let cached = global.__mongoose_cache__;
 if (!cached) {
-  cached = global._mongooseConnection = { conn: null, promise: null };
+  cached = global.__mongoose_cache__ = { conn: null, promise: null };
 }
 
-const connectDB = async () => {
-  // If already connected, reuse existing connection
+async function connectDB() {
+  // Already connected — return immediately
   if (cached.conn && mongoose.connection.readyState === 1) {
     return cached.conn;
   }
 
-  // If a connection attempt is already in progress, wait for it
-  if (!cached.promise) {
-    console.log('🔄 Initiating new MongoDB connection...');
+  // Reset if connection was lost
+  if (cached.conn && mongoose.connection.readyState !== 1) {
+    cached.conn = null;
+    cached.promise = null;
+  }
 
-    cached.promise = mongoose.connect(process.env.MONGO_URI, {
+  // Start new connection if none in progress
+  if (!cached.promise) {
+    const uri = MONGODB_URI();
+    if (!uri) {
+      throw new Error('MONGO_URI environment variable is not set');
+    }
+
+    console.log('🔄 MongoDB: Initiating connection...');
+    cached.promise = mongoose.connect(uri, {
       maxPoolSize: 10,
-      serverSelectionTimeoutMS: 10000,
+      serverSelectionTimeoutMS: 15000,
       socketTimeoutMS: 45000,
-    })
-    .then((m) => {
-      console.log(`✅ MongoDB Connected: ${m.connection.host}`);
-      console.log(`📊 Database: ${m.connection.name}`);
-      return m;
-    })
-    .catch((error) => {
-      console.error(`❌ MongoDB Connection Error: ${error.message}`);
+    }).then((mongooseInstance) => {
+      console.log(`✅ MongoDB Connected: ${mongooseInstance.connection.host}`);
+      console.log(`📊 Database: ${mongooseInstance.connection.name}`);
+      cached.conn = mongooseInstance;
+      return mongooseInstance;
+    }).catch((err) => {
+      console.error(`❌ MongoDB Connection Failed: ${err.message}`);
+      // Reset so next request retries
       cached.promise = null;
       cached.conn = null;
-      throw error;
+      throw err;
     });
   }
 
-  try {
-    cached.conn = await cached.promise;
-  } catch (error) {
-    cached.promise = null;
-    cached.conn = null;
-    throw error;
-  }
-
+  // Wait for the in-progress connection
+  cached.conn = await cached.promise;
   return cached.conn;
-};
+}
 
 module.exports = connectDB;
