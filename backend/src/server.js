@@ -10,40 +10,61 @@ const { seedDB } = require('./config/seed');
 // Load env vars
 dotenv.config();
 
-// Connect to database
-connectDB();
-
 const app = express();
 
 // Trust proxy (required for Vercel + rate limiting)
 app.set('trust proxy', 1);
 
-// CORS configuration
+// CORS configuration — explicitly allow your Vercel frontend
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   'http://127.0.0.1:5173',
+  'https://ev-power-station-iori.vercel.app',
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, etc.)
+    // Allow requests with no origin (mobile apps, curl, Postman, etc.)
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(null, true); // Allow all origins in production for now
+      return callback(null, true);
     }
+    // In production, allow all Vercel preview URLs
+    if (origin && origin.endsWith('.vercel.app')) {
+      return callback(null, true);
+    }
+    return callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
+// Handle preflight OPTIONS requests explicitly
+app.options('*', cors());
+
 // Security middleware
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json());
+
+// ========================================================
+// CRITICAL: Ensure MongoDB is connected BEFORE any route
+// This middleware runs on EVERY request and awaits connectDB()
+// ========================================================
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    console.error('❌ DB middleware connection error:', error.message);
+    res.status(503).json({
+      message: 'Database connection failed. Please try again.',
+      error: process.env.NODE_ENV === 'production' ? undefined : error.message
+    });
+  }
+});
 
 // Serve uploaded files (for local dev — Vercel has read-only fs)
 if (process.env.NODE_ENV !== 'production') {
@@ -74,18 +95,24 @@ app.use('/api/invoices', require('./routes/invoiceRoutes'));
 app.use('/api/contact', require('./routes/contactRoutes'));
 
 // Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: Date.now() });
+app.get('/api/health', async (req, res) => {
+  const mongoose = require('mongoose');
+  res.json({
+    status: 'ok',
+    timestamp: Date.now(),
+    db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
 });
 
 // Error handler
 app.use(errorHandler);
 
-// Seed database on first run
-seedDB().catch(console.error);
+// Seed database (non-blocking — runs in background)
+connectDB().then(() => {
+  seedDB().catch(console.error);
+}).catch(console.error);
 
 // For local development: start server
-// In production (Vercel), the app is exported and handled by serverless
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {

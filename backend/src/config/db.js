@@ -6,33 +6,41 @@ if (!cached) {
 }
 
 const connectDB = async () => {
-  // If already connected, reuse
-  if (cached.conn) {
+  // If already connected, reuse existing connection
+  if (cached.conn && mongoose.connection.readyState === 1) {
     return cached.conn;
   }
 
+  // If a connection attempt is already in progress, wait for it
   if (!cached.promise) {
-    const opts = {
-      bufferCommands: false,
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
-    };
+    console.log('🔄 Initiating new MongoDB connection...');
 
-    cached.promise = mongoose.connect(process.env.MONGO_URI, opts)
-      .then((m) => {
-        console.log(`✅ MongoDB Connected: ${m.connection.host}`);
-        console.log(`📊 Database: ${m.connection.name}`);
-        return m;
-      })
-      .catch((error) => {
-        cached.promise = null;
-        console.error(`❌ MongoDB Connection Error: ${error.message}`);
-        throw error;
-      });
+    cached.promise = mongoose.connect(process.env.MONGO_URI, {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+    })
+    .then((m) => {
+      console.log(`✅ MongoDB Connected: ${m.connection.host}`);
+      console.log(`📊 Database: ${m.connection.name}`);
+      return m;
+    })
+    .catch((error) => {
+      console.error(`❌ MongoDB Connection Error: ${error.message}`);
+      cached.promise = null;
+      cached.conn = null;
+      throw error;
+    });
   }
 
-  cached.conn = await cached.promise;
+  try {
+    cached.conn = await cached.promise;
+  } catch (error) {
+    cached.promise = null;
+    cached.conn = null;
+    throw error;
+  }
+
   return cached.conn;
 };
 
