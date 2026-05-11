@@ -31,25 +31,47 @@ app.options('*', cors());
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json());
 
-// =============================================================
-// CRITICAL MIDDLEWARE: await DB connection on EVERY request
-// This ensures mongoose is connected before any route handler
-// =============================================================
-app.use(async (req, res, next) => {
+// ── Routes that do NOT need database ──
+app.get('/', (req, res) => res.json({
+  message: 'VoltReserve Backend API is running',
+  version: '2.0.0',
+  mongoUri: process.env.MONGO_URI ? 'SET' : 'NOT SET',
+  nodeEnv: process.env.NODE_ENV || 'not set'
+}));
+app.get('/.well-known/appspecific/com.chrome.devtools.json', (req, res) => res.json({}));
+
+// Health check (no DB required)
+app.get('/api/health', (req, res) => {
+  const mongoose = require('mongoose');
+  res.json({
+    status: 'ok',
+    timestamp: Date.now(),
+    dbState: mongoose.connection.readyState,
+    envCheck: {
+      MONGO_URI: process.env.MONGO_URI ? 'SET' : 'MISSING',
+      JWT_SECRET: process.env.JWT_SECRET ? 'SET' : 'MISSING',
+      FRONTEND_URL: process.env.FRONTEND_URL || 'MISSING'
+    }
+  });
+});
+
+// ══════════════════════════════════════════════════════════
+// DB MIDDLEWARE: Every /api/* route below this AWAITS DB
+// ══════════════════════════════════════════════════════════
+app.use('/api', async (req, res, next) => {
   try {
     await connectDB();
     next();
   } catch (error) {
-    console.error('❌ DB connection middleware failed:', error.message);
-    return res.status(503).json({ message: 'Database unavailable. Please retry.' });
+    console.error('❌ DB middleware error:', error.message);
+    return res.status(503).json({
+      message: 'Database connection failed',
+      detail: error.message
+    });
   }
 });
 
-// Root
-app.get('/', (req, res) => res.json({ message: 'VoltReserve Backend API is running', version: '2.0.0' }));
-app.get('/.well-known/appspecific/com.chrome.devtools.json', (req, res) => res.json({}));
-
-// API Routes
+// ── API Routes (DB guaranteed connected) ──
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/stations', require('./routes/stationRoutes'));
 app.use('/api/bookings', require('./routes/bookingRoutes'));
@@ -63,16 +85,6 @@ app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/payments', require('./routes/paymentRoutes'));
 app.use('/api/invoices', require('./routes/invoiceRoutes'));
 app.use('/api/contact', require('./routes/contactRoutes'));
-
-// Health check
-app.get('/api/health', (req, res) => {
-  const mongoose = require('mongoose');
-  res.json({
-    status: 'ok',
-    timestamp: Date.now(),
-    dbState: mongoose.connection.readyState
-  });
-});
 
 // Error handler
 app.use(errorHandler);
